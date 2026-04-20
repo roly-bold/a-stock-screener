@@ -17,7 +17,9 @@ def get_results():
 
 
 @router.post("/start")
-def start_scan(req: ScanStartRequest = ScanStartRequest()):
+def start_scan(req: ScanStartRequest = None):
+    if req is None:
+        req = ScanStartRequest()
     params = req.strategy.model_dump()
     ok = scan_runner.start_scan(days=req.days, delay=req.delay, strategy_params=params)
     if not ok:
@@ -54,4 +56,12 @@ async def scan_status(request: Request):
         finally:
             scan_runner.remove_queue(queue)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
