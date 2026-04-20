@@ -17,8 +17,10 @@ function loadSavedParams() {
 export default function ScanControls({ onComplete, onParamsChange }) {
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(null)
+  const [error, setError] = useState('')
   const [params, setParams] = useState(loadSavedParams)
   const esRef = useRef(null)
+  const pollRef = useRef(null)
 
   const saveParams = useCallback((newParams) => {
     setParams(newParams)
@@ -38,6 +40,13 @@ export default function ScanControls({ onComplete, onParamsChange }) {
     onParamsChange?.(params)
   }, [])
 
+  const stopScan = useCallback(() => {
+    setRunning(false)
+    setProgress(null)
+    if (esRef.current) { esRef.current.close(); esRef.current = null }
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }, [])
+
   const connectSSE = useCallback(() => {
     if (esRef.current) esRef.current.close()
     const es = new EventSource('/api/scan/status')
@@ -46,17 +55,14 @@ export default function ScanControls({ onComplete, onParamsChange }) {
       const data = JSON.parse(e.data)
       if (data.type === 'progress') {
         setProgress(data)
+        setError('')
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
       } else if (data.type === 'complete') {
-        setRunning(false)
-        setProgress(null)
-        es.close()
-        esRef.current = null
+        stopScan()
         onComplete()
       } else if (data.type === 'error') {
-        setRunning(false)
-        setProgress(null)
-        es.close()
-        esRef.current = null
+        stopScan()
+        setError(data.message || '扫描出错')
       } else if (data.type === 'watchlist_alerts') {
         if (data.alerts?.length && Notification.permission === 'granted') {
           for (const a of data.alerts) {
@@ -65,37 +71,47 @@ export default function ScanControls({ onComplete, onParamsChange }) {
         }
       }
     }
-    es.onerror = () => {
-      es.close()
-      esRef.current = null
-      if (running) {
-        setRunning(false)
-        setProgress(null)
-      }
-    }
-  }, [onComplete, running])
+    es.onerror = () => { es.close(); esRef.current = null }
+  }, [onComplete, stopScan])
+
+  const startPolling = useCallback(() => {
+    if (pollRef.current) return
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await scanState()
+        if (res.status === 'idle') {
+          stopScan()
+          setError('扫描已结束（SSE连接中断）')
+        }
+      } catch {}
+    }, 5000)
+  }, [stopScan])
 
   const start = useCallback(async () => {
+    setError('')
     try {
       connectSSE()
-      await new Promise(r => setTimeout(r, 100))
+      await new Promise(r => setTimeout(r, 200))
       const res = await startScan({ strategy: params })
       if (res.status === 'started' || res.status === 'already_running') {
         setRunning(true)
+        startPolling()
       }
-    } catch {
+    } catch (e) {
+      setError('启动扫描失败')
       if (esRef.current) esRef.current.close()
     }
-  }, [connectSSE, params])
+  }, [connectSSE, startPolling, params])
 
   useEffect(() => {
     scanState().then(res => {
       if (res.status === 'running') {
         setRunning(true)
         connectSSE()
+        startPolling()
       }
     })
-  }, [connectSSE])
+  }, [connectSSE, startPolling])
 
   const pct = progress ? progress.percent : 0
 
@@ -114,6 +130,7 @@ export default function ScanControls({ onComplete, onParamsChange }) {
           </>
         )}
       </div>
+      {error && <p className="error-msg">{error}</p>}
       <StrategyParams params={params} onChange={changeParam} onReset={resetParams} />
       <ScheduleSettings />
     </>

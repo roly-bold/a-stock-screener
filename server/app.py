@@ -38,7 +38,10 @@ app.include_router(watchlist.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    from data_fetcher import _load_config
+    config = _load_config()
+    has_token = bool(config.get("tushare_token"))
+    return {"status": "ok", "token_configured": has_token}
 
 
 if os.path.isdir(STATIC_DIR):
