@@ -53,6 +53,7 @@ export default function ScanControls({ onComplete, onParamsChange }) {
       try {
         const res = await scanState()
         if (res.status === 'running') {
+          if (res.progress) setProgress(res.progress)
           setError('')
           return
         }

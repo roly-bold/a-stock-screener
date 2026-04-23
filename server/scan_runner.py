@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from datetime import datetime
 
 from data_fetcher import get_stock_list, get_stock_hist, get_chip_perf, get_broker_recommend, _code_to_ts
@@ -21,6 +21,7 @@ _subscribers: list[asyncio.Queue] = []
 _latest_results: list[dict] = []
 _latest_timestamp = ""
 _last_error = ""
+_latest_progress: dict | None = None
 _loop: asyncio.AbstractEventLoop | None = None
 _rate_lock = threading.Lock()
 _api_calls = []
@@ -74,6 +75,7 @@ def get_state():
         "timestamp": _latest_timestamp,
         "results_count": len(_latest_results),
         "error": _last_error,
+        "progress": _latest_progress,
     }
 
 
@@ -98,6 +100,12 @@ def remove_queue(q):
 
 
 def _emit(event: dict):
+    global _latest_progress
+    if event.get("type") == "progress":
+        payload = event.copy()
+        payload["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _latest_progress = payload
+        event = payload
     if _loop:
         for q in _subscribers:
             _loop.call_soon_threadsafe(q.put_nowait, event)
@@ -177,11 +185,12 @@ def _enrich_signals(signals):
 
 
 def _run_scan_thread(days, delay, strategy_params):
-    global _scan_status, _latest_results, _latest_timestamp, _current_strategy_params, _cancel_flag, _last_error
+    global _scan_status, _latest_results, _latest_timestamp, _current_strategy_params, _cancel_flag, _last_error, _latest_progress
 
     _current_strategy_params = strategy_params.copy()
     _cancel_flag = False
     _last_error = ""
+    _latest_progress = None
     global _api_calls
     _api_calls = []
     max_workers = 20
@@ -199,13 +208,28 @@ def _run_scan_thread(days, delay, strategy_params):
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {pool.submit(_fetch_one, code, name, days, delay, strategy_params): code
                        for code, name in tasks}
-            for future in as_completed(futures):
+            pending = set(futures)
+            while pending:
                 if _cancel_flag:
                     pool.shutdown(wait=False, cancel_futures=True)
                     _scan_status = _STATUS_IDLE
                     _emit({"type": "cancelled"})
                     _subscribers.clear()
                     return
+                try:
+                    future = next(as_completed(pending, timeout=5))
+                except FuturesTimeoutError:
+                    _emit({
+                        "type": "progress",
+                        "phase": "fetching",
+                        "current": fetched,
+                        "total": total,
+                        "percent": round(fetched / total * 100, 1) if total else 0,
+                        "heartbeat": True,
+                        "pending": len(pending),
+                    })
+                    continue
+                pending.remove(future)
                 fetched += 1
                 code = futures[future]
                 try:
@@ -232,6 +256,14 @@ def _run_scan_thread(days, delay, strategy_params):
         _latest_results = results
         _latest_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         _scan_status = _STATUS_COMPLETE
+        _latest_progress = {
+            "type": "progress",
+            "phase": "complete",
+            "current": total,
+            "total": total,
+            "percent": 100,
+            "updated_at": _latest_timestamp,
+        }
 
         _emit({"type": "complete", "signals_count": len(results), "timestamp": _latest_timestamp})
 

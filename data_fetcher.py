@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import logging
 import tushare as ts
 import tushare.pro.client as client
 import pandas as pd
@@ -8,6 +9,9 @@ from tqdm import tqdm
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 _pro = None
+_logger = logging.getLogger(__name__)
+_TUSHARE_TIMEOUT_SECONDS = float(os.environ.get("TUSHARE_TIMEOUT_SECONDS", "12"))
+_DEFAULT_HIST_RETRIES = int(os.environ.get("TUSHARE_HIST_RETRIES", "2"))
 
 
 def _load_config():
@@ -35,7 +39,7 @@ def _get_pro():
     if not token:
         raise RuntimeError("未配置 tushare token，请运行: python main.py --setup")
     client.DataApi._DataApi__http_url = api_url
-    _pro = ts.pro_api(token)
+    _pro = ts.pro_api(token, timeout=_TUSHARE_TIMEOUT_SECONDS)
     return _pro
 
 
@@ -82,8 +86,10 @@ def _normalize_hist_df(df, rename_map):
     return df
 
 
-def get_stock_hist(symbol, days=120, retries=3):
+def get_stock_hist(symbol, days=120, retries=None):
     """获取单只股票日K数据（前复权），tushare 主源"""
+    if retries is None:
+        retries = _DEFAULT_HIST_RETRIES
     end_date = pd.Timestamp.now().strftime("%Y%m%d")
     start_date = (pd.Timestamp.now() - pd.Timedelta(days=days * 2)).strftime("%Y%m%d")
     ts_code = _code_to_ts(symbol)
@@ -107,9 +113,12 @@ def get_stock_hist(symbol, days=120, retries=3):
             df = _normalize_hist_df(df, _TUSHARE_RENAME)
             if len(df) >= 10:
                 return df.tail(days).reset_index(drop=True)
-        except Exception:
+        except Exception as exc:
             if attempt < retries - 1:
+                _logger.warning("获取 %s 历史数据失败，第 %s/%s 次重试: %s", ts_code, attempt + 1, retries, exc)
                 time.sleep(0.5 * (attempt + 1))
+            else:
+                _logger.warning("获取 %s 历史数据失败，已放弃: %s", ts_code, exc)
     return pd.DataFrame()
 
 
