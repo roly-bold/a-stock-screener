@@ -7,6 +7,9 @@ export default function SignalCard({ signal }) {
     { label: '浮盈', value: `${signal.pnl_pct >= 0 ? '+' : ''}${signal.pnl_pct?.toFixed(2)}%`, cls: signal.pnl_pct >= 0 ? 'up' : 'down' },
     { label: '突破位', value: signal.pivot_high?.toFixed(2) },
     { label: '支撑位', value: signal.support_price?.toFixed(2) },
+    { label: '筹码胜率', value: `${signal.winner_rate?.toFixed(1)}%`, cls: signal.winner_rate > 50 ? 'up' : 'down' },
+    { label: '加权成本', value: signal.weight_avg_cost?.toFixed(2) },
+    { label: '券商推荐', value: signal.broker_count > 0 ? `${signal.broker_count}家` : '-' },
     { label: '起爆量', value: fmtVol(signal.breakout_vol) },
     { label: '买入量', value: fmtVol(signal.entry_vol) },
   ]

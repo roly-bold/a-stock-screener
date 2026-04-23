@@ -31,6 +31,11 @@ class SignalResult(BaseModel):
     latest_close: float
     exit_triggered: bool
     pnl_pct: float
+    winner_rate: float = 0
+    weight_avg_cost: float = 0
+    cost_50pct: float = 0
+    broker_count: int = 0
+    brokers: list[str] = []
 
 
 class ScanResults(BaseModel):

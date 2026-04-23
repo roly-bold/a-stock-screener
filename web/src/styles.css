@@ -111,6 +111,16 @@ a:hover { text-decoration: underline; }
 .btn-danger:hover { opacity: 0.85; }
 .btn-sm { padding: 4px 12px; font-size: 13px; }
 
+.broker-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  background: rgba(234,179,8,0.15);
+  color: var(--yellow);
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: help;
+}
+
 .progress-bar {
   flex: 1;
   height: 6px;

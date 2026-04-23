@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
-from data_fetcher import get_stock_list, get_stock_hist
+from data_fetcher import get_stock_list, get_stock_hist, get_chip_perf, get_broker_recommend, _code_to_ts
 from strategy import screen_stock
 
 _STATUS_IDLE = "idle"
@@ -120,6 +120,29 @@ def _fetch_one(code, name, days, strategy_params):
     return signals
 
 
+def _enrich_signals(signals):
+    if not signals:
+        return
+    brokers = get_broker_recommend()
+    for i, s in enumerate(signals):
+        ts_code = _code_to_ts(s["code"])
+        chip = get_chip_perf(ts_code)
+        if chip:
+            s["winner_rate"] = round(chip.get("winner_rate", 0), 2)
+            s["weight_avg_cost"] = round(chip.get("weight_avg", 0), 2)
+            s["cost_50pct"] = round(chip.get("cost_50pct", 0), 2)
+        else:
+            s["winner_rate"] = 0
+            s["weight_avg_cost"] = 0
+            s["cost_50pct"] = 0
+        rec = brokers.get(s["code"], [])
+        s["brokers"] = rec
+        s["broker_count"] = len(rec)
+        if (i + 1) % 10 == 0 or i == len(signals) - 1:
+            _emit({"type": "progress", "phase": "enriching", "current": i + 1,
+                   "total": len(signals), "percent": round((i + 1) / len(signals) * 100, 1)})
+
+
 def _run_scan_thread(days, delay, strategy_params):
     global _scan_status, _latest_results, _latest_timestamp, _current_strategy_params, _cancel_flag
 
@@ -158,6 +181,10 @@ def _run_scan_thread(days, delay, strategy_params):
                            "percent": round(fetched / total * 100, 1)})
 
         results.sort(key=lambda x: x["entry_date"], reverse=True)
+
+        _emit({"type": "progress", "phase": "enriching", "current": 0, "total": len(results), "percent": 0})
+        _enrich_signals(results)
+
         _add_pnl(results)
 
         with open(_RESULTS_PATH, "w", encoding="utf-8") as f:

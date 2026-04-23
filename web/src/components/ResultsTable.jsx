@@ -71,6 +71,8 @@ export default function ResultsTable({ signals, strategyParams }) {
               <SortTh k="pnl_pct">浮盈%</SortTh>
               <SortTh k="pivot_high">突破位</SortTh>
               <SortTh k="support_price">支撑位</SortTh>
+              <SortTh k="winner_rate">胜率%</SortTh>
+              <SortTh k="broker_count">券商</SortTh>
               <SortTh k="exit_triggered">止损</SortTh>
               <th>操作</th>
             </tr>
@@ -92,6 +94,8 @@ export default function ResultsTable({ signals, strategyParams }) {
                 </td>
                 <td>{s.pivot_high?.toFixed(2)}</td>
                 <td>{s.support_price?.toFixed(2)}</td>
+                <td className={s.winner_rate > 50 ? 'up' : 'down'}>{s.winner_rate?.toFixed(1)}</td>
+                <td>{s.broker_count > 0 ? <span className="broker-badge" title={s.brokers?.join('、')}>{s.broker_count}家</span> : ''}</td>
                 <td>{s.exit_triggered ? '✓' : ''}</td>
                 <td><button className="btn btn-sm btn-watch" onClick={(e) => handleWatch(s, e)}>监控</button></td>
               </tr>

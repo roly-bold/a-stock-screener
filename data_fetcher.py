@@ -137,3 +137,38 @@ def scan_all_stocks(stock_list, days=120, delay=0.3):
             results[code] = (name, df)
         time.sleep(delay)
     return results
+
+
+def get_chip_perf(ts_code, trade_date=None):
+    """获取单只股票筹码成本和胜率"""
+    pro = _get_pro()
+    try:
+        if trade_date:
+            df = pro.cyq_perf(ts_code=ts_code, trade_date=trade_date)
+        else:
+            end = pd.Timestamp.now().strftime("%Y%m%d")
+            start = (pd.Timestamp.now() - pd.Timedelta(days=7)).strftime("%Y%m%d")
+            df = pro.cyq_perf(ts_code=ts_code, start_date=start, end_date=end)
+        if df is None or df.empty:
+            return None
+        return df.iloc[-1].to_dict()
+    except Exception:
+        return None
+
+
+def get_broker_recommend(month=None):
+    """获取券商月度金股，返回 {ts_code: [broker1, broker2, ...]}"""
+    if not month:
+        month = pd.Timestamp.now().strftime("%Y%m")
+    pro = _get_pro()
+    try:
+        df = pro.broker_recommend(month=month)
+        if df is None or df.empty:
+            return {}
+        result = {}
+        for _, row in df.iterrows():
+            code = _ts_to_code(row["ts_code"])
+            result.setdefault(code, []).append(row["broker"])
+        return result
+    except Exception:
+        return {}
