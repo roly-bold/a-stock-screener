@@ -19,6 +19,8 @@ _subscribers: list[asyncio.Queue] = []
 _latest_results: list[dict] = []
 _latest_timestamp = ""
 _loop: asyncio.AbstractEventLoop | None = None
+_rate_lock = threading.Lock()
+_api_calls = []
 
 _default_strategy_params = {
     "vol_ma_window": 20,
@@ -88,9 +90,26 @@ def _emit(event: dict):
             _loop.call_soon_threadsafe(q.put_nowait, event)
 
 
+_MAX_API_PER_MIN = 450
+
+
+def _wait_rate():
+    global _api_calls
+    with _rate_lock:
+        now = time.time()
+        _api_calls = [t for t in _api_calls if now - t < 60]
+        if len(_api_calls) >= _MAX_API_PER_MIN:
+            sleep_time = 60 - (now - _api_calls[0]) + 0.1
+            time.sleep(max(0, sleep_time))
+            now = time.time()
+            _api_calls = [t for t in _api_calls if now - t < 60]
+        _api_calls.append(time.time())
+
+
 def _fetch_one(code, name, days, strategy_params):
     if _cancel_flag:
         return None
+    _wait_rate()
     df = get_stock_hist(code, days=days)
     if df.empty or len(df) < 30:
         return None
@@ -106,7 +125,9 @@ def _run_scan_thread(days, delay, strategy_params):
 
     _current_strategy_params = strategy_params.copy()
     _cancel_flag = False
-    max_workers = 10
+    global _api_calls
+    _api_calls = []
+    max_workers = 20
 
     try:
         _emit({"type": "progress", "phase": "listing", "current": 0, "total": 0, "percent": 0})
