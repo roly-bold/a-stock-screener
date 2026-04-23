@@ -95,15 +95,15 @@ _MAX_API_PER_MIN = 450
 
 def _wait_rate():
     global _api_calls
-    with _rate_lock:
-        now = time.time()
-        _api_calls = [t for t in _api_calls if now - t < 60]
-        if len(_api_calls) >= _MAX_API_PER_MIN:
-            sleep_time = 60 - (now - _api_calls[0]) + 0.1
-            time.sleep(max(0, sleep_time))
+    while True:
+        with _rate_lock:
             now = time.time()
             _api_calls = [t for t in _api_calls if now - t < 60]
-        _api_calls.append(time.time())
+            if len(_api_calls) < _MAX_API_PER_MIN:
+                _api_calls.append(time.time())
+                return
+            sleep_time = 60 - (now - _api_calls[0]) + 0.1
+        time.sleep(max(0, sleep_time))
 
 
 def _fetch_one(code, name, days, strategy_params):
