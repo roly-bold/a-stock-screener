@@ -47,6 +47,35 @@ export default function ScanControls({ onComplete, onParamsChange }) {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
   }, [])
 
+  const startPolling = useCallback(() => {
+    if (pollRef.current) return
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await scanState()
+        if (res.status === 'running') {
+          setError('')
+          return
+        }
+        if (res.status === 'complete') {
+          stopScan()
+          setError('')
+          onComplete()
+          return
+        }
+        if (res.status === 'error') {
+          stopScan()
+          setError(res.error || '扫描出错')
+          return
+        }
+        if (res.status === 'idle') {
+          stopScan()
+          onComplete()
+          setError('扫描已结束，已刷新最新结果')
+        }
+      } catch {}
+    }, 5000)
+  }, [onComplete, stopScan])
+
   const connectSSE = useCallback(() => {
     if (esRef.current) esRef.current.close()
     const es = new EventSource('/api/scan/status')
@@ -56,7 +85,6 @@ export default function ScanControls({ onComplete, onParamsChange }) {
       if (data.type === 'progress') {
         setProgress(data)
         setError('')
-        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
       } else if (data.type === 'complete') {
         stopScan()
         onComplete()
@@ -74,21 +102,15 @@ export default function ScanControls({ onComplete, onParamsChange }) {
         }
       }
     }
-    es.onerror = () => { es.close(); esRef.current = null }
-  }, [onComplete, stopScan])
-
-  const startPolling = useCallback(() => {
-    if (pollRef.current) return
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await scanState()
-        if (res.status === 'idle') {
-          stopScan()
-          setError('扫描已结束（SSE连接中断）')
-        }
-      } catch {}
-    }, 5000)
-  }, [stopScan])
+    es.onerror = () => {
+      if (esRef.current === es) {
+        es.close()
+        esRef.current = null
+      }
+      setError(prev => prev || '实时连接中断，正在切换到轮询状态...')
+      startPolling()
+    }
+  }, [onComplete, startPolling, stopScan])
 
   const start = useCallback(async () => {
     setError('')
@@ -117,9 +139,16 @@ export default function ScanControls({ onComplete, onParamsChange }) {
         setRunning(true)
         connectSSE()
         startPolling()
+      } else if (res.status === 'complete') {
+        onComplete()
       }
     })
-  }, [connectSSE, startPolling])
+  }, [connectSSE, onComplete, startPolling])
+
+  useEffect(() => () => {
+    if (esRef.current) esRef.current.close()
+    if (pollRef.current) clearInterval(pollRef.current)
+  }, [])
 
   const pct = progress ? progress.percent : 0
 

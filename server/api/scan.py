@@ -34,7 +34,7 @@ def get_params():
 
 @router.get("/state")
 def scan_state():
-    return {"status": scan_runner.get_status()}
+    return scan_runner.get_state()
 
 
 @router.post("/stop")

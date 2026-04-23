@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import threading
 import time
@@ -12,15 +13,18 @@ from strategy import screen_stock
 _STATUS_IDLE = "idle"
 _STATUS_RUNNING = "running"
 _STATUS_COMPLETE = "complete"
+_STATUS_ERROR = "error"
 
 _scan_status = _STATUS_IDLE
 _cancel_flag = False
 _subscribers: list[asyncio.Queue] = []
 _latest_results: list[dict] = []
 _latest_timestamp = ""
+_last_error = ""
 _loop: asyncio.AbstractEventLoop | None = None
 _rate_lock = threading.Lock()
 _api_calls = []
+_logger = logging.getLogger(__name__)
 
 _default_strategy_params = {
     "vol_ma_window": 20,
@@ -64,6 +68,15 @@ def get_results():
     return _latest_results, _latest_timestamp
 
 
+def get_state():
+    return {
+        "status": _scan_status,
+        "timestamp": _latest_timestamp,
+        "results_count": len(_latest_results),
+        "error": _last_error,
+    }
+
+
 def get_strategy_params():
     return _current_strategy_params.copy()
 
@@ -93,40 +106,60 @@ def _emit(event: dict):
 _MAX_API_PER_MIN = 450
 
 
-def _wait_rate():
+def _reserve_api_calls(count=1):
     global _api_calls
     while True:
         with _rate_lock:
             now = time.time()
             _api_calls = [t for t in _api_calls if now - t < 60]
-            if len(_api_calls) < _MAX_API_PER_MIN:
-                _api_calls.append(time.time())
+            if len(_api_calls) + count <= _MAX_API_PER_MIN:
+                _api_calls.extend([now] * count)
                 return
-            sleep_time = 60 - (now - _api_calls[0]) + 0.1
+            sleep_time = 60 - (now - _api_calls[0]) + 0.1 if _api_calls else 0.5
         time.sleep(max(0, sleep_time))
 
 
-def _fetch_one(code, name, days, strategy_params):
+def _wait_rate():
+    _reserve_api_calls()
+
+
+def _fetch_one(code, name, days, delay, strategy_params):
     if _cancel_flag:
         return None
-    _wait_rate()
-    df = get_stock_hist(code, days=days)
-    if df.empty or len(df) < 30:
+    if delay > 0:
+        time.sleep(delay)
+    _reserve_api_calls(2)
+    try:
+        df = get_stock_hist(code, days=days)
+        if df.empty or len(df) < 30:
+            return None
+        signals = screen_stock(df, **strategy_params)
+        for s in signals:
+            s["code"] = code
+            s["name"] = name
+        return signals
+    except Exception:
+        _logger.exception("扫描股票失败: %s(%s)", name, code)
         return None
-    signals = screen_stock(df, **strategy_params)
-    for s in signals:
-        s["code"] = code
-        s["name"] = name
-    return signals
 
 
 def _enrich_signals(signals):
     if not signals:
         return
-    brokers = get_broker_recommend()
+    try:
+        _reserve_api_calls()
+        brokers = get_broker_recommend()
+    except Exception:
+        _logger.exception("加载券商推荐失败")
+        brokers = {}
     for i, s in enumerate(signals):
         ts_code = _code_to_ts(s["code"])
-        chip = get_chip_perf(ts_code)
+        try:
+            _reserve_api_calls()
+            chip = get_chip_perf(ts_code)
+        except Exception:
+            _logger.exception("加载筹码数据失败: %s", ts_code)
+            chip = None
         if chip:
             s["winner_rate"] = round(chip.get("winner_rate", 0), 2)
             s["weight_avg_cost"] = round(chip.get("weight_avg", 0), 2)
@@ -144,10 +177,11 @@ def _enrich_signals(signals):
 
 
 def _run_scan_thread(days, delay, strategy_params):
-    global _scan_status, _latest_results, _latest_timestamp, _current_strategy_params, _cancel_flag
+    global _scan_status, _latest_results, _latest_timestamp, _current_strategy_params, _cancel_flag, _last_error
 
     _current_strategy_params = strategy_params.copy()
     _cancel_flag = False
+    _last_error = ""
     global _api_calls
     _api_calls = []
     max_workers = 20
@@ -163,7 +197,7 @@ def _run_scan_thread(days, delay, strategy_params):
         tasks = [(row["code"], row["name"]) for _, row in stock_list.iterrows()]
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(_fetch_one, code, name, days, strategy_params): code
+            futures = {pool.submit(_fetch_one, code, name, days, delay, strategy_params): code
                        for code, name in tasks}
             for future in as_completed(futures):
                 if _cancel_flag:
@@ -173,10 +207,15 @@ def _run_scan_thread(days, delay, strategy_params):
                     _subscribers.clear()
                     return
                 fetched += 1
-                sigs = future.result()
+                code = futures[future]
+                try:
+                    sigs = future.result()
+                except Exception:
+                    _logger.exception("线程任务失败: %s", code)
+                    sigs = None
                 if sigs:
                     results.extend(sigs)
-                if fetched % 50 == 0:
+                if fetched % 25 == 0 or fetched == total:
                     _emit({"type": "progress", "phase": "fetching", "current": fetched, "total": total,
                            "percent": round(fetched / total * 100, 1)})
 
@@ -207,8 +246,10 @@ def _run_scan_thread(days, delay, strategy_params):
         _subscribers.clear()
 
     except Exception as e:
-        _scan_status = _STATUS_IDLE
-        _emit({"type": "error", "message": str(e)})
+        _last_error = str(e) or "扫描失败"
+        _scan_status = _STATUS_ERROR
+        _logger.exception("扫描任务失败")
+        _emit({"type": "error", "message": _last_error})
         _subscribers.clear()
 
 
