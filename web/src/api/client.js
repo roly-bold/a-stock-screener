@@ -26,6 +26,10 @@ export function scanState() {
   return fetchJSON('/scan/state')
 }
 
+export function stopScan() {
+  return fetchJSON('/scan/stop', { method: 'POST' })
+}
+
 export function stockHistory(code, days = 120) {
   return fetchJSON(`/stock/${code}/history?days=${days}`)
 }

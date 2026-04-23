@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { startScan, scanState } from '../api/client'
+import { startScan, scanState, stopScan as apiStopScan } from '../api/client'
 import StrategyParams, { DEFAULTS } from './StrategyParams'
 import ScheduleSettings from './ScheduleSettings'
 
@@ -63,6 +63,9 @@ export default function ScanControls({ onComplete, onParamsChange }) {
       } else if (data.type === 'error') {
         stopScan()
         setError(data.message || '扫描出错')
+      } else if (data.type === 'cancelled') {
+        stopScan()
+        setError('扫描已停止')
       } else if (data.type === 'watchlist_alerts') {
         if (data.alerts?.length && Notification.permission === 'granted') {
           for (const a of data.alerts) {
@@ -103,6 +106,11 @@ export default function ScanControls({ onComplete, onParamsChange }) {
     }
   }, [connectSSE, startPolling, params])
 
+  const handleStop = useCallback(async () => {
+    try { await apiStopScan() } catch {}
+    stopScan()
+  }, [stopScan])
+
   useEffect(() => {
     scanState().then(res => {
       if (res.status === 'running') {
@@ -121,6 +129,11 @@ export default function ScanControls({ onComplete, onParamsChange }) {
         <button className="btn btn-primary" disabled={running} onClick={start}>
           {running ? '扫描中...' : '开始扫描'}
         </button>
+        {running && (
+          <button className="btn btn-danger" onClick={handleStop}>
+            停止扫描
+          </button>
+        )}
         {running && progress && (
           <>
             <div className="progress-bar">

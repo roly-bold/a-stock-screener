@@ -12,7 +12,7 @@ class StrategyParams(BaseModel):
 
 class ScanStartRequest(BaseModel):
     days: int = 120
-    delay: float = 0.3
+    delay: float = 0.05
     strategy: StrategyParams = StrategyParams()
 
 

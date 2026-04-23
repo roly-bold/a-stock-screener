@@ -37,6 +37,12 @@ def scan_state():
     return {"status": scan_runner.get_status()}
 
 
+@router.post("/stop")
+def stop_scan():
+    ok = scan_runner.stop_scan()
+    return {"status": "stopping" if ok else "not_running"}
+
+
 @router.get("/status")
 async def scan_status(request: Request):
     queue = scan_runner.create_queue()
@@ -49,7 +55,7 @@ async def scan_status(request: Request):
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=30)
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                    if event.get("type") in ("complete", "error"):
+                    if event.get("type") in ("complete", "error", "cancelled"):
                         break
                 except asyncio.TimeoutError:
                     yield f"data: {json.dumps({'type': 'ping'})}\n\n"

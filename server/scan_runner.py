@@ -13,6 +13,7 @@ _STATUS_RUNNING = "running"
 _STATUS_COMPLETE = "complete"
 
 _scan_status = _STATUS_IDLE
+_cancel_flag = False
 _subscribers: list[asyncio.Queue] = []
 _latest_results: list[dict] = []
 _latest_timestamp = ""
@@ -87,9 +88,10 @@ def _emit(event: dict):
 
 
 def _run_scan_thread(days, delay, strategy_params):
-    global _scan_status, _latest_results, _latest_timestamp, _current_strategy_params
+    global _scan_status, _latest_results, _latest_timestamp, _current_strategy_params, _cancel_flag
 
     _current_strategy_params = strategy_params.copy()
+    _cancel_flag = False
 
     try:
         _emit({"type": "progress", "phase": "listing", "current": 0, "total": 0, "percent": 0})
@@ -100,6 +102,11 @@ def _run_scan_thread(days, delay, strategy_params):
         results = []
         fetched = 0
         for _, row in stock_list.iterrows():
+            if _cancel_flag:
+                _scan_status = _STATUS_IDLE
+                _emit({"type": "cancelled"})
+                _subscribers.clear()
+                return
             code, name = row["code"], row["name"]
             df = get_stock_hist(code, days=days)
             fetched += 1
@@ -145,7 +152,7 @@ def _run_scan_thread(days, delay, strategy_params):
         _subscribers.clear()
 
 
-def start_scan(days=120, delay=0.3, strategy_params=None):
+def start_scan(days=120, delay=0.05, strategy_params=None):
     global _scan_status
     if _scan_status == _STATUS_RUNNING:
         return False
@@ -153,4 +160,12 @@ def start_scan(days=120, delay=0.3, strategy_params=None):
     params = strategy_params or _default_strategy_params.copy()
     t = threading.Thread(target=_run_scan_thread, args=(days, delay, params), daemon=True)
     t.start()
+    return True
+
+
+def stop_scan():
+    global _cancel_flag, _scan_status
+    if _scan_status != _STATUS_RUNNING:
+        return False
+    _cancel_flag = True
     return True
