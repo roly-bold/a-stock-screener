@@ -3,6 +3,7 @@ import json
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from data_fetcher import get_stock_list, get_stock_hist
@@ -87,11 +88,25 @@ def _emit(event: dict):
             _loop.call_soon_threadsafe(q.put_nowait, event)
 
 
+def _fetch_one(code, name, days, strategy_params):
+    if _cancel_flag:
+        return None
+    df = get_stock_hist(code, days=days)
+    if df.empty or len(df) < 30:
+        return None
+    signals = screen_stock(df, **strategy_params)
+    for s in signals:
+        s["code"] = code
+        s["name"] = name
+    return signals
+
+
 def _run_scan_thread(days, delay, strategy_params):
     global _scan_status, _latest_results, _latest_timestamp, _current_strategy_params, _cancel_flag
 
     _current_strategy_params = strategy_params.copy()
     _cancel_flag = False
+    max_workers = 10
 
     try:
         _emit({"type": "progress", "phase": "listing", "current": 0, "total": 0, "percent": 0})
@@ -101,28 +116,25 @@ def _run_scan_thread(days, delay, strategy_params):
 
         results = []
         fetched = 0
-        for _, row in stock_list.iterrows():
-            if _cancel_flag:
-                _scan_status = _STATUS_IDLE
-                _emit({"type": "cancelled"})
-                _subscribers.clear()
-                return
-            code, name = row["code"], row["name"]
-            df = get_stock_hist(code, days=days)
-            fetched += 1
+        tasks = [(row["code"], row["name"]) for _, row in stock_list.iterrows()]
 
-            if not df.empty and len(df) >= 30:
-                signals = screen_stock(df, **strategy_params)
-                for s in signals:
-                    s["code"] = code
-                    s["name"] = name
-                results.extend(signals)
-
-            if fetched % 10 == 0:
-                _emit({"type": "progress", "phase": "fetching", "current": fetched, "total": total,
-                       "percent": round(fetched / total * 100, 1)})
-
-            time.sleep(delay)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_fetch_one, code, name, days, strategy_params): code
+                       for code, name in tasks}
+            for future in as_completed(futures):
+                if _cancel_flag:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    _scan_status = _STATUS_IDLE
+                    _emit({"type": "cancelled"})
+                    _subscribers.clear()
+                    return
+                fetched += 1
+                sigs = future.result()
+                if sigs:
+                    results.extend(sigs)
+                if fetched % 50 == 0:
+                    _emit({"type": "progress", "phase": "fetching", "current": fetched, "total": total,
+                           "percent": round(fetched / total * 100, 1)})
 
         results.sort(key=lambda x: x["entry_date"], reverse=True)
         _add_pnl(results)
