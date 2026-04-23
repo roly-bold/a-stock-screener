@@ -4,7 +4,7 @@
 
 基于"二次突破"量化策略的A股选股系统，自动扫描全市场，识别涨停起爆→缩量整理→二次突破的买入信号，并跟踪止损。
 
-- **在线地址**: `https://你的域名.up.railway.app`
+
 - **技术栈**: Python/FastAPI + React/Vite + ECharts + Tushare
 
 ---
