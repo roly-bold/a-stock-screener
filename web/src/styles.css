@@ -164,6 +164,10 @@ a:hover { text-decoration: underline; }
   background: rgba(34, 197, 94, 0.16);
   color: var(--green);
 }
+.decision-info {
+  background: rgba(88, 166, 255, 0.16);
+  color: var(--blue);
+}
 .decision-warn {
   background: rgba(234, 179, 8, 0.16);
   color: var(--yellow);
@@ -219,6 +223,7 @@ tr:hover td { background: var(--surface); }
 
 .up { color: var(--red); }
 .down { color: var(--green); }
+.info { color: var(--blue); }
 
 /* Stock detail */
 .back-link {

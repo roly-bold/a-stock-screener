@@ -5,6 +5,7 @@ import { formatPct, getSignalDecision, getSignalMetrics } from '../utils/signalD
 
 const VIEW_ALL = 'all'
 const VIEW_SHORTLIST = 'shortlist'
+const VIEW_WATCHLIST = 'watchlist'
 
 function buildDecoratedSignals(signals) {
   return signals.map((signal) => {
@@ -38,12 +39,22 @@ export default function ResultsTable({ signals, strategyParams }) {
 
   const decoratedSignals = useMemo(() => buildDecoratedSignals(signals), [signals])
   const shortlistSignals = useMemo(
-    () => decoratedSignals.filter((signal) => signal.decision.label === '可关注'),
+    () => decoratedSignals.filter((signal) => signal.decision.bucket === VIEW_SHORTLIST),
+    [decoratedSignals],
+  )
+  const watchlistSignals = useMemo(
+    () => decoratedSignals.filter((signal) => signal.decision.bucket === VIEW_WATCHLIST),
     [decoratedSignals],
   )
 
   const sorted = useMemo(() => {
-    const source = viewMode === VIEW_SHORTLIST ? shortlistSignals : decoratedSignals
+    const source = (
+      viewMode === VIEW_SHORTLIST
+        ? shortlistSignals
+        : viewMode === VIEW_WATCHLIST
+          ? watchlistSignals
+          : decoratedSignals
+    )
     const arr = [...source]
     arr.sort((a, b) => {
       let result = compareValues(a[sortKey], b[sortKey], sortDir)
@@ -59,7 +70,7 @@ export default function ResultsTable({ signals, strategyParams }) {
       return compareValues(a.code, b.code, 'asc')
     })
     return arr
-  }, [decoratedSignals, shortlistSignals, sortKey, sortDir, viewMode])
+  }, [decoratedSignals, shortlistSignals, sortKey, sortDir, viewMode, watchlistSignals])
 
   const visibleSelected = useMemo(
     () => sorted.filter((signal) => selected.has(signal.code)),
@@ -77,7 +88,7 @@ export default function ResultsTable({ signals, strategyParams }) {
 
   function switchView(mode) {
     setViewMode(mode)
-    if (mode === VIEW_SHORTLIST) {
+    if (mode === VIEW_SHORTLIST || mode === VIEW_WATCHLIST) {
       setSortKey('entry_date')
       setSortDir('desc')
     }
@@ -130,7 +141,13 @@ export default function ResultsTable({ signals, strategyParams }) {
         <strong>距买点%</strong>
         <span>、</span>
         <strong>预估止损%</strong>
-        <span>；默认的交易清单只保留 `可关注`，更适合直接做候选池。</span>
+        <span>；现在按</span>
+        <strong>交易清单</strong>
+        <span>、</span>
+        <strong>观察池</strong>
+        <span>、</span>
+        <strong>全部结果</strong>
+        <span>三层查看，不再只剩极少数候选。</span>
       </div>
 
       <div className="results-toolbar">
@@ -142,6 +159,12 @@ export default function ResultsTable({ signals, strategyParams }) {
             交易清单 ({shortlistSignals.length})
           </button>
           <button
+            className={`btn btn-sm ${viewMode === VIEW_WATCHLIST ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => switchView(VIEW_WATCHLIST)}
+          >
+            观察池 ({watchlistSignals.length})
+          </button>
+          <button
             className={`btn btn-sm ${viewMode === VIEW_ALL ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => switchView(VIEW_ALL)}
           >
@@ -150,16 +173,27 @@ export default function ResultsTable({ signals, strategyParams }) {
         </div>
         <div className="results-toolbar-text">
           {viewMode === VIEW_SHORTLIST
-            ? '默认按买入日优先，买点越新越靠前；同一天内更接近买点、止损更短的排前面。'
-            : '切回全部结果后，可以继续复盘已过买点和已止损信号。'}
+            ? '交易清单放宽到 8 天内、距买点 -5% 到 +12%、距支撑不超过 15%，用于直接做候选。'
+            : viewMode === VIEW_WATCHLIST
+              ? '观察池保留结构仍在但位置不够舒服的信号，适合等回踩、换手或再次转强。'
+              : '全部结果可继续复盘已过买点和已止损信号，方便校准阈值。'}
         </div>
       </div>
 
       {!sorted.length ? (
         <div className="empty-state shortlist-empty">
-          当前没有 `可关注` 候选，说明这批结果更偏历史复盘。
+          {viewMode === VIEW_SHORTLIST
+            ? '当前没有 `可关注` 候选，这一轮更适合先看观察池。'
+            : viewMode === VIEW_WATCHLIST
+              ? '当前没有 `观察池` 候选，这一轮信号不是很集中。'
+              : '当前没有结果。'}
           <div style={{ marginTop: 12 }}>
-            <button className="btn btn-sm btn-ghost" onClick={() => switchView(VIEW_ALL)}>查看全部结果</button>
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={() => switchView(viewMode === VIEW_SHORTLIST ? VIEW_WATCHLIST : VIEW_ALL)}
+            >
+              {viewMode === VIEW_SHORTLIST ? '查看观察池' : '查看全部结果'}
+            </button>
           </div>
         </div>
       ) : (

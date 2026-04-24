@@ -5,11 +5,19 @@ function pctClass(value) {
   return value >= 0 ? 'up' : 'down'
 }
 
+function toneClass(tone) {
+  if (tone === 'good') return 'up'
+  if (tone === 'danger') return 'down'
+  if (tone === 'info') return 'info'
+  return ''
+}
+
 export default function SignalCard({ signal }) {
   const decision = getSignalDecision(signal)
   const metrics = getSignalMetrics(signal)
   const items = [
-    { label: '当前判断', value: decision.label, cls: decision.tone === 'good' ? 'up' : decision.tone === 'danger' ? 'down' : '' },
+    { label: '当前判断', value: decision.label, cls: toneClass(decision.tone) },
+    { label: '判断说明', value: decision.reason },
     { label: '起爆日', value: signal.breakout_date },
     { label: '买入日', value: signal.entry_date },
     { label: '买入价', value: signal.entry_price?.toFixed(2) },
