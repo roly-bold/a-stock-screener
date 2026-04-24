@@ -17,6 +17,7 @@ export default function SignalCard({ signal }) {
     { label: '浮盈', value: `${signal.pnl_pct >= 0 ? '+' : ''}${signal.pnl_pct?.toFixed(2)}%`, cls: signal.pnl_pct >= 0 ? 'up' : 'down' },
     { label: '距买点', value: formatPct(metrics.distanceToEntryPct), cls: pctClass(metrics.distanceToEntryPct) },
     { label: '距支撑', value: formatPct(metrics.distanceToSupportPct), cls: pctClass(metrics.distanceToSupportPct) },
+    { label: '预估止损', value: formatPct(metrics.stopLossRiskPct), cls: pctClass(-metrics.stopLossRiskPct) },
     { label: '突破位', value: signal.pivot_high?.toFixed(2) },
     { label: '支撑位', value: signal.support_price?.toFixed(2) },
     { label: '获利盘%', value: `${signal.winner_rate?.toFixed(1)}%`, cls: signal.winner_rate > 50 ? 'up' : 'down' },

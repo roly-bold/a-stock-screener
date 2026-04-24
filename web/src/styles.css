@@ -172,6 +172,37 @@ a:hover { text-decoration: underline; }
   background: rgba(239, 68, 68, 0.16);
   color: var(--red);
 }
+.results-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.view-switch {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn-ghost {
+  background: var(--surface);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover {
+  color: var(--text);
+  border-color: var(--blue);
+}
+.results-toolbar-text {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.shortlist-empty {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
 
 /* Results table */
 .table-wrap { overflow-x: auto; }

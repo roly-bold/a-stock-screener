@@ -19,11 +19,15 @@ function daysBetween(fromValue, toValue) {
 export function getSignalMetrics(signal) {
   const distanceToEntryPct = pctDistance(signal.latest_close, signal.entry_price)
   const distanceToSupportPct = pctDistance(signal.latest_close, signal.support_price)
+  const stopLossRiskPct = signal.latest_close && signal.support_price
+    ? ((signal.latest_close - signal.support_price) / signal.latest_close) * 100
+    : null
   const signalAgeDays = daysBetween(signal.entry_date, signal.latest_date)
 
   return {
     distanceToEntryPct,
     distanceToSupportPct,
+    stopLossRiskPct,
     signalAgeDays,
   }
 }
