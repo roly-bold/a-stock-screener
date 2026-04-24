@@ -1,9 +1,9 @@
 import asyncio
 import json
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
-from server.models import ScanResults, SignalResult, ScanStartRequest, StrategyParams
+from server.models import ScanResults, SignalResult, ScanStartRequest
 from server import scan_runner
 
 router = APIRouter(prefix="/api/scan", tags=["scan"])
@@ -21,7 +21,8 @@ def start_scan(req: ScanStartRequest = None):
     if req is None:
         req = ScanStartRequest()
     params = req.strategy.model_dump()
-    ok = scan_runner.start_scan(days=req.days, delay=req.delay, strategy_params=params)
+    scope = req.scope.model_dump()
+    ok = scan_runner.start_scan(days=req.days, delay=req.delay, strategy_params=params, scope=scope)
     if not ok:
         return {"status": "already_running"}
     return {"status": "started"}
@@ -30,6 +31,16 @@ def start_scan(req: ScanStartRequest = None):
 @router.get("/params")
 def get_params():
     return scan_runner.get_strategy_params()
+
+
+@router.get("/universe")
+def get_scan_universe(market_board: str | None = Query(default=None)):
+    return scan_runner.get_scan_options(market_board=market_board)
+
+
+@router.get("/history")
+def get_scan_history():
+    return {"runs": scan_runner.get_scan_history()}
 
 
 @router.get("/state")

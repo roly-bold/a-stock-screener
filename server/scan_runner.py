@@ -4,10 +4,18 @@ import logging
 import os
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from datetime import datetime
 
-from data_fetcher import get_stock_list, get_stock_hist, get_chip_perf, get_broker_recommend, _code_to_ts
+from data_fetcher import (
+    _code_to_ts,
+    get_broker_recommend,
+    get_chip_perf,
+    get_scan_universe_options,
+    get_stock_hist,
+    get_stock_universe,
+)
 from strategy import screen_stock
 
 _STATUS_IDLE = "idle"
@@ -22,6 +30,8 @@ _latest_results: list[dict] = []
 _latest_timestamp = ""
 _last_error = ""
 _latest_progress: dict | None = None
+_current_scope = {"market_board": "全部板块", "industry": "全部行业"}
+_current_run_id = ""
 _loop: asyncio.AbstractEventLoop | None = None
 _rate_lock = threading.Lock()
 _api_calls = []
@@ -38,6 +48,9 @@ _default_strategy_params = {
 _current_strategy_params = _default_strategy_params.copy()
 
 _RESULTS_PATH = os.path.join(os.path.dirname(__file__), "..", "results.json")
+_HISTORY_PATH = os.path.join(os.path.dirname(__file__), "..", "scan_history.json")
+_MAX_HISTORY_RUNS = 20
+_MAX_LOGS_PER_RUN = 180
 
 
 def _add_pnl(signals):
@@ -76,11 +89,120 @@ def get_state():
         "results_count": len(_latest_results),
         "error": _last_error,
         "progress": _latest_progress,
+        "scope": _current_scope.copy(),
+        "run_id": _current_run_id,
     }
 
 
 def get_strategy_params():
     return _current_strategy_params.copy()
+
+
+def get_scan_options(market_board=None):
+    options = get_scan_universe_options()
+    if market_board and market_board not in ("全部板块", "全部市场", "全部"):
+        filtered = get_stock_universe(market_board=market_board)
+        industry_counts = (
+            filtered.groupby("industry")
+            .size()
+            .sort_values(ascending=False)
+            .items()
+        )
+        options["industries"] = [{"name": name, "count": int(count)} for name, count in industry_counts]
+        options["total_count"] = int(len(filtered))
+    else:
+        options["total_count"] = int(sum(item["count"] for item in options["market_boards"]))
+    return options
+
+
+def _load_history():
+    if os.path.exists(_HISTORY_PATH):
+        try:
+            with open(_HISTORY_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data
+        except Exception:
+            _logger.exception("读取扫描历史失败")
+    return []
+
+
+def _save_history(history):
+    try:
+        with open(_HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(history[:_MAX_HISTORY_RUNS], f, ensure_ascii=False, indent=2)
+    except Exception:
+        _logger.exception("保存扫描历史失败")
+
+
+def get_scan_history():
+    return _load_history()
+
+
+def _start_history_run(days, delay, strategy_params, scope):
+    global _current_run_id
+    run_id = uuid.uuid4().hex[:12]
+    _current_run_id = run_id
+    started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    run = {
+        "run_id": run_id,
+        "status": _STATUS_RUNNING,
+        "started_at": started_at,
+        "finished_at": None,
+        "days": days,
+        "delay": delay,
+        "scope": scope.copy(),
+        "strategy": strategy_params.copy(),
+        "signals_count": 0,
+        "error": "",
+        "logs": [{
+            "type": "started",
+            "timestamp": started_at,
+            "message": f"开始扫描: {scope.get('market_board', '全部板块')} / {scope.get('industry', '全部行业')}",
+        }],
+    }
+    history = [run] + [item for item in _load_history() if item.get("run_id") != run_id]
+    _save_history(history)
+    return run_id
+
+
+def _append_history_event(event):
+    if not _current_run_id:
+        return
+    history = _load_history()
+    timestamp = event.get("updated_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for run in history:
+        if run.get("run_id") != _current_run_id:
+            continue
+        log = {
+            "type": event.get("type", "log"),
+            "timestamp": timestamp,
+        }
+        for key in ("phase", "current", "total", "percent", "message", "heartbeat", "pending"):
+            if key in event:
+                log[key] = event.get(key)
+        run.setdefault("logs", []).append(log)
+        run["logs"] = run["logs"][-_MAX_LOGS_PER_RUN:]
+        break
+    _save_history(history)
+
+
+def _finish_history_run(status, signals_count=0, error=""):
+    global _current_run_id
+    if not _current_run_id:
+        return
+    history = _load_history()
+    finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for run in history:
+        if run.get("run_id") != _current_run_id:
+            continue
+        run["status"] = status
+        run["finished_at"] = finished_at
+        run["signals_count"] = signals_count
+        run["error"] = error
+        break
+    _save_history(history)
+    _current_run_id = ""
 
 
 def set_loop(loop):
@@ -106,6 +228,8 @@ def _emit(event: dict):
         payload["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         _latest_progress = payload
         event = payload
+    if event.get("type") in {"progress", "complete", "error", "cancelled"}:
+        _append_history_event(event)
     if _loop:
         for q in _subscribers:
             _loop.call_soon_threadsafe(q.put_nowait, event)
@@ -184,10 +308,12 @@ def _enrich_signals(signals):
                    "total": len(signals), "percent": round((i + 1) / len(signals) * 100, 1)})
 
 
-def _run_scan_thread(days, delay, strategy_params):
-    global _scan_status, _latest_results, _latest_timestamp, _current_strategy_params, _cancel_flag, _last_error, _latest_progress
+def _run_scan_thread(days, delay, strategy_params, scope):
+    global _scan_status, _latest_results, _latest_timestamp, _current_strategy_params
+    global _cancel_flag, _last_error, _latest_progress, _current_scope
 
     _current_strategy_params = strategy_params.copy()
+    _current_scope = scope.copy()
     _cancel_flag = False
     _last_error = ""
     _latest_progress = None
@@ -196,9 +322,15 @@ def _run_scan_thread(days, delay, strategy_params):
     max_workers = 20
 
     try:
+        _start_history_run(days, delay, strategy_params, scope)
         _emit({"type": "progress", "phase": "listing", "current": 0, "total": 0, "percent": 0})
-        stock_list = get_stock_list()
+        stock_list = get_stock_universe(
+            market_board=scope.get("market_board"),
+            industry=scope.get("industry"),
+        )
         total = len(stock_list)
+        if total == 0:
+            raise RuntimeError("所选板块范围内没有可扫描股票，请调整筛选条件。")
         _emit({"type": "progress", "phase": "fetching", "current": 0, "total": total, "percent": 0})
 
         results = []
@@ -214,6 +346,7 @@ def _run_scan_thread(days, delay, strategy_params):
                     pool.shutdown(wait=False, cancel_futures=True)
                     _scan_status = _STATUS_IDLE
                     _emit({"type": "cancelled"})
+                    _finish_history_run("cancelled", signals_count=len(results))
                     _subscribers.clear()
                     return
                 try:
@@ -266,6 +399,7 @@ def _run_scan_thread(days, delay, strategy_params):
         }
 
         _emit({"type": "complete", "signals_count": len(results), "timestamp": _latest_timestamp})
+        _finish_history_run(_STATUS_COMPLETE, signals_count=len(results))
 
         from server import watchlist
         try:
@@ -282,16 +416,18 @@ def _run_scan_thread(days, delay, strategy_params):
         _scan_status = _STATUS_ERROR
         _logger.exception("扫描任务失败")
         _emit({"type": "error", "message": _last_error})
+        _finish_history_run(_STATUS_ERROR, error=_last_error)
         _subscribers.clear()
 
 
-def start_scan(days=120, delay=0.05, strategy_params=None):
+def start_scan(days=120, delay=0.05, strategy_params=None, scope=None):
     global _scan_status
     if _scan_status == _STATUS_RUNNING:
         return False
     _scan_status = _STATUS_RUNNING
     params = strategy_params or _default_strategy_params.copy()
-    t = threading.Thread(target=_run_scan_thread, args=(days, delay, params), daemon=True)
+    scan_scope = scope or _current_scope.copy()
+    t = threading.Thread(target=_run_scan_thread, args=(days, delay, params, scan_scope), daemon=True)
     t.start()
     return True
 

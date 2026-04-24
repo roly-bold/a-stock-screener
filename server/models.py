@@ -10,10 +10,16 @@ class StrategyParams(BaseModel):
     vol_shrink_ratio: float = 0.5
 
 
+class ScanScope(BaseModel):
+    market_board: str = "全部板块"
+    industry: str = "全部行业"
+
+
 class ScanStartRequest(BaseModel):
     days: int = 120
     delay: float = 0.05
     strategy: StrategyParams = StrategyParams()
+    scope: ScanScope = ScanScope()
 
 
 class SignalResult(BaseModel):
@@ -49,6 +55,37 @@ class ScanProgress(BaseModel):
     current: int
     total: int
     percent: float
+
+
+class ScanOption(BaseModel):
+    name: str
+    count: int
+
+
+class ScanHistoryEvent(BaseModel):
+    type: str
+    timestamp: str
+    phase: str | None = None
+    current: int | None = None
+    total: int | None = None
+    percent: float | None = None
+    message: str | None = None
+    heartbeat: bool | None = None
+    pending: int | None = None
+
+
+class ScanHistoryItem(BaseModel):
+    run_id: str
+    status: str
+    started_at: str
+    finished_at: str | None = None
+    days: int = 120
+    delay: float = 0.05
+    scope: ScanScope = ScanScope()
+    strategy: StrategyParams = StrategyParams()
+    signals_count: int = 0
+    error: str = ""
+    logs: list[ScanHistoryEvent] = []
 
 
 class StockHistoryBar(BaseModel):

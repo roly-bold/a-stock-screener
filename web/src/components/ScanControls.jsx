@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { startScan, scanState, stopScan as apiStopScan } from '../api/client'
+import ScanScopeSelector, { loadSavedScope } from './ScanScopeSelector'
 import StrategyParams, { DEFAULTS } from './StrategyParams'
 import ScheduleSettings from './ScheduleSettings'
 
@@ -19,6 +20,7 @@ export default function ScanControls({ onComplete, onParamsChange }) {
   const [progress, setProgress] = useState(null)
   const [error, setError] = useState('')
   const [params, setParams] = useState(loadSavedParams)
+  const [scope, setScope] = useState(loadSavedScope)
   const esRef = useRef(null)
   const pollRef = useRef(null)
 
@@ -38,6 +40,10 @@ export default function ScanControls({ onComplete, onParamsChange }) {
 
   useEffect(() => {
     onParamsChange?.(params)
+  }, [])
+
+  const changeScope = useCallback((nextScope) => {
+    setScope(nextScope)
   }, [])
 
   const stopScan = useCallback(() => {
@@ -118,7 +124,7 @@ export default function ScanControls({ onComplete, onParamsChange }) {
     try {
       connectSSE()
       await new Promise(r => setTimeout(r, 200))
-      const res = await startScan({ strategy: params })
+      const res = await startScan({ strategy: params, scope })
       if (res.status === 'started' || res.status === 'already_running') {
         setRunning(true)
         startPolling()
@@ -127,7 +133,7 @@ export default function ScanControls({ onComplete, onParamsChange }) {
       setError('启动扫描失败')
       if (esRef.current) esRef.current.close()
     }
-  }, [connectSSE, startPolling, params])
+  }, [connectSSE, startPolling, params, scope])
 
   const handleStop = useCallback(async () => {
     try { await apiStopScan() } catch {}
@@ -152,6 +158,7 @@ export default function ScanControls({ onComplete, onParamsChange }) {
   }, [])
 
   const pct = progress ? progress.percent : 0
+  const phaseLabel = progress?.phase ? `阶段: ${progress.phase}` : ''
 
   return (
     <>
@@ -170,10 +177,12 @@ export default function ScanControls({ onComplete, onParamsChange }) {
               <div className="progress-fill" style={{ width: `${pct}%` }} />
             </div>
             <span className="progress-text">{progress.current}/{progress.total} ({pct}%)</span>
+            {phaseLabel && <span className="progress-text">{phaseLabel}</span>}
           </>
         )}
       </div>
       {error && <p className="error-msg">{error}</p>}
+      <ScanScopeSelector value={scope} onChange={changeScope} />
       <StrategyParams params={params} onChange={changeParam} onReset={resetParams} />
       <ScheduleSettings />
     </>

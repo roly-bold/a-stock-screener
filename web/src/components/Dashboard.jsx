@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { scanResults } from '../api/client'
 import ScanControls from './ScanControls'
+import ScanHistoryPanel from './ScanHistoryPanel'
 import ResultsTable from './ResultsTable'
 
 export default function Dashboard() {
@@ -31,6 +32,7 @@ export default function Dashboard() {
   return (
     <>
       <ScanControls onComplete={onComplete} onParamsChange={setStrategyParams} />
+      <ScanHistoryPanel />
       {error && <p className="error-msg">{error}</p>}
       {loading && !data ? (
         <div className="empty-state">加载中...</div>

@@ -22,6 +22,15 @@ export function getStrategyParams() {
   return fetchJSON('/scan/params')
 }
 
+export function getScanUniverse(marketBoard = '') {
+  const query = marketBoard ? `?market_board=${encodeURIComponent(marketBoard)}` : ''
+  return fetchJSON(`/scan/universe${query}`)
+}
+
+export function getScanHistory() {
+  return fetchJSON('/scan/history')
+}
+
 export function scanState() {
   return fetchJSON('/scan/state')
 }

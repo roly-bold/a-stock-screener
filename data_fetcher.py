@@ -12,6 +12,9 @@ _pro = None
 _logger = logging.getLogger(__name__)
 _TUSHARE_TIMEOUT_SECONDS = float(os.environ.get("TUSHARE_TIMEOUT_SECONDS", "12"))
 _DEFAULT_HIST_RETRIES = int(os.environ.get("TUSHARE_HIST_RETRIES", "2"))
+_UNIVERSE_CACHE_TTL_SECONDS = int(os.environ.get("SCAN_UNIVERSE_CACHE_TTL_SECONDS", "3600"))
+_SUPPORTED_MARKET_BOARDS = ("沪主板", "深主板", "创业板")
+_universe_cache = {"fetched_at": 0.0, "data": None}
 
 
 def _load_config():
@@ -55,14 +58,73 @@ def _ts_to_code(ts_code):
     return ts_code.split(".")[0]
 
 
-def get_stock_list():
-    """获取A股全部股票列表，过滤ST/退市/北交所/科创板"""
+def _classify_market_board(code):
+    if code.startswith(("300", "301")):
+        return "创业板"
+    if code.startswith("688"):
+        return "科创板"
+    if code.startswith(("600", "601", "603", "605")):
+        return "沪主板"
+    if code.startswith(("000", "001", "002", "003")):
+        return "深主板"
+    if code.startswith(("4", "8", "9")):
+        return "北交所"
+    return "其他"
+
+
+def _get_universe_df(force_refresh=False):
+    now = time.time()
+    if (not force_refresh and _universe_cache["data"] is not None
+            and now - _universe_cache["fetched_at"] < _UNIVERSE_CACHE_TTL_SECONDS):
+        return _universe_cache["data"].copy()
+
     pro = _get_pro()
     df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,symbol,name,area,industry")
     df = df.rename(columns={"symbol": "code"})
     df = df[~df["name"].str.contains("ST|\\*ST|退", na=False)]
-    df = df[~df["code"].str.startswith(("688", "8", "4", "9"), na=False)]
-    return df[["code", "name"]].reset_index(drop=True)
+    df["industry"] = df["industry"].fillna("未分类")
+    df["market_board"] = df["code"].map(_classify_market_board)
+    df = df[["code", "name", "market_board", "industry"]].reset_index(drop=True)
+    _universe_cache["data"] = df
+    _universe_cache["fetched_at"] = now
+    return df.copy()
+
+
+def get_stock_universe(market_board=None, industry=None, supported_only=True):
+    """获取股票池，可按市场板块和行业筛选。"""
+    df = _get_universe_df()
+    if supported_only:
+        df = df[df["market_board"].isin(_SUPPORTED_MARKET_BOARDS)]
+    if market_board and market_board not in ("全部板块", "全部市场", "全部"):
+        df = df[df["market_board"] == market_board]
+    if industry and industry not in ("全部行业", "全部"):
+        df = df[df["industry"] == industry]
+    return df.reset_index(drop=True)
+
+
+def get_scan_universe_options():
+    df = get_stock_universe()
+    market_counts = (
+        df.groupby("market_board")
+        .size()
+        .sort_values(ascending=False)
+        .items()
+    )
+    industry_counts = (
+        df.groupby("industry")
+        .size()
+        .sort_values(ascending=False)
+        .items()
+    )
+    return {
+        "market_boards": [{"name": name, "count": int(count)} for name, count in market_counts],
+        "industries": [{"name": name, "count": int(count)} for name, count in industry_counts],
+    }
+
+
+def get_stock_list():
+    """获取默认扫描股票列表。"""
+    return get_stock_universe()[["code", "name"]].reset_index(drop=True)
 
 
 _TUSHARE_RENAME = {
