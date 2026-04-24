@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { addToWatchlist } from '../api/client'
+import { formatPct, getSignalDecision, getSignalMetrics } from '../utils/signalDecision'
 
 export default function ResultsTable({ signals, strategyParams }) {
   const navigate = useNavigate()
@@ -9,7 +10,11 @@ export default function ResultsTable({ signals, strategyParams }) {
   const [selected, setSelected] = useState(new Set())
 
   const sorted = useMemo(() => {
-    const arr = [...signals]
+    const arr = signals.map((signal) => {
+      const metrics = getSignalMetrics(signal)
+      const decision = getSignalDecision(signal)
+      return { ...signal, ...metrics, decision }
+    })
     arr.sort((a, b) => {
       let va = a[sortKey], vb = b[sortKey]
       if (typeof va === 'string') { va = va || ''; vb = vb || '' }
@@ -57,6 +62,17 @@ export default function ResultsTable({ signals, strategyParams }) {
 
   return (
     <>
+      <div className="results-hint">
+        <span>先看</span>
+        <strong>判断</strong>
+        <span>、</span>
+        <strong>买入日</strong>
+        <span>、</span>
+        <strong>距买点%</strong>
+        <span>、</span>
+        <strong>距支撑%</strong>
+        <span>；`已触发止损` 先排除，`已过买点` 更适合回看，不适合直接追。</span>
+      </div>
       <div className="table-wrap">
         <table>
           <thead>
@@ -64,14 +80,17 @@ export default function ResultsTable({ signals, strategyParams }) {
               <th className="th-check"></th>
               <SortTh k="code">代码</SortTh>
               <SortTh k="name">名称</SortTh>
+              <th>判断</th>
               <SortTh k="breakout_date">起爆日</SortTh>
               <SortTh k="entry_date">买入日</SortTh>
               <SortTh k="entry_price">买入价</SortTh>
               <SortTh k="latest_close">最新价</SortTh>
               <SortTh k="pnl_pct">浮盈%</SortTh>
+              <SortTh k="distanceToEntryPct">距买点%</SortTh>
+              <SortTh k="distanceToSupportPct">距支撑%</SortTh>
               <SortTh k="pivot_high">突破位</SortTh>
               <SortTh k="support_price">支撑位</SortTh>
-              <SortTh k="winner_rate">胜率%</SortTh>
+              <SortTh k="winner_rate">获利盘%</SortTh>
               <SortTh k="broker_count">券商</SortTh>
               <SortTh k="exit_triggered">止损</SortTh>
               <th>操作</th>
@@ -85,6 +104,11 @@ export default function ResultsTable({ signals, strategyParams }) {
                 </td>
                 <td>{s.code}</td>
                 <td>{s.name}</td>
+                <td>
+                  <span className={`decision-badge decision-${s.decision.tone}`} title={s.decision.reason}>
+                    {s.decision.label}
+                  </span>
+                </td>
                 <td>{s.breakout_date}</td>
                 <td>{s.entry_date}</td>
                 <td>{s.entry_price?.toFixed(2)}</td>
@@ -92,6 +116,8 @@ export default function ResultsTable({ signals, strategyParams }) {
                 <td className={s.pnl_pct >= 0 ? 'up' : 'down'}>
                   {s.pnl_pct >= 0 ? '+' : ''}{s.pnl_pct?.toFixed(2)}%
                 </td>
+                <td className={s.distanceToEntryPct >= 0 ? 'up' : 'down'}>{formatPct(s.distanceToEntryPct)}</td>
+                <td className={s.distanceToSupportPct >= 0 ? 'up' : 'down'}>{formatPct(s.distanceToSupportPct)}</td>
                 <td>{s.pivot_high?.toFixed(2)}</td>
                 <td>{s.support_price?.toFixed(2)}</td>
                 <td className={s.winner_rate > 50 ? 'up' : 'down'}>{s.winner_rate?.toFixed(1)}</td>
