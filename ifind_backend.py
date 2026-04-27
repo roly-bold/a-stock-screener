@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 import pandas as pd
 from ifind_client import IFindClient
@@ -95,29 +96,10 @@ def get_stock_hist(symbol, days=120, retries=2):
 
 def get_stock_universe(market_board=None, industry=None, supported_only=True):
     client = _get_client()
-    try:
-        df = client.get_data_pool("block", "all")
-        if df is None or df.empty:
-            _logger.warning("iFinD data_pool 为空，回退到 basic_data_service")
-            return _fallback_universe(market_board, industry, supported_only)
+    df = _try_all_pool_methods(client)
 
-        cols_map = {k: v for k, v in _IFIND_BASIC_RENAME.items() if k in df.columns}
-        df = df.rename(columns=cols_map)
-
-        if "name" not in df.columns and "stockName" in df.columns:
-            df["name"] = df["stockName"]
-        if "code" not in df.columns and "stockCode" in df.columns:
-            df["code"] = df["stockCode"]
-
-        df["market_board"] = df["code"].map(_classify_market_board)
-        df["industry"] = df.get("industry", "未分类").fillna("未分类")
-        df = df[~df["name"].str.contains("ST|\\*ST|退", na=False)]
-
-        keep_cols = ["code", "name", "market_board", "industry"]
-        df = df[[c for c in keep_cols if c in df.columns]].reset_index(drop=True)
-    except Exception as exc:
-        _logger.warning("iFinD 获取股票池异常: %s", exc)
-        return _fallback_universe(market_board, industry, supported_only)
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["code", "name", "market_board", "industry"])
 
     if supported_only:
         df = df[df["market_board"].isin(_SUPPORTED_MARKET_BOARDS)]
@@ -128,40 +110,113 @@ def get_stock_universe(market_board=None, industry=None, supported_only=True):
     return df.reset_index(drop=True)
 
 
-def _fallback_universe(market_board=None, industry=None, supported_only=True):
-    """iFinD 回退方案：用沪深300+中证500成分股拼接股票池"""
-    client = _get_client()
+def _try_all_pool_methods(client):
+    """尝试多种方式获取股票池，返回 DataFrame 或 None"""
+    # 方法1: data_pool("block", "all")
+    try:
+        df = client.get_data_pool("block", "all")
+        if df is not None and not df.empty:
+            return _normalize_pool_df(df)
+    except Exception:
+        pass
+
+    # 方法2: 问财智能选股 — 沪深主板
+    try:
+        sh_codes = client.smart_stock_picking("沪深主板A股", "stock")
+        sz_codes = client.smart_stock_picking("深市主板A股", "stock")
+        cy_codes = client.smart_stock_picking("创业板A股", "stock")
+        all_codes = (sh_codes or []) + (sz_codes or []) + (cy_codes or [])
+        if all_codes:
+            records = []
+            for item in all_codes:
+                code = item.get("code", "")
+                name = item.get("name", "")
+                records.append({"code": _ts_to_code(code) if "." in str(code) else str(code), "name": str(name)})
+            df = pd.DataFrame(records)
+            df = df.drop_duplicates(subset=["code"])
+            df["market_board"] = df["code"].map(_classify_market_board)
+            df["industry"] = "未分类"
+            df = df[~df["name"].str.contains("ST|\\*ST|退", na=False)]
+            if not df.empty:
+                return df
+    except Exception:
+        pass
+
+    # 方法3: 沪深300 + 中证500 成分股
     stocks = pd.DataFrame()
-    for pool_code in ["沪深300", "中证500"]:
+    for query in ["沪深300成分股", "中证500成分股"]:
         try:
-            df = client.get_data_pool("index", pool_code)
-            if df is not None and not df.empty:
-                stocks = pd.concat([stocks, df], ignore_index=True)
+            result = client.smart_stock_picking(query, "stock")
+            if result:
+                records = []
+                for item in result:
+                    code = item.get("code", "")
+                    name = item.get("name", "")
+                    records.append({"code": _ts_to_code(code) if "." in str(code) else str(code), "name": str(name)})
+                part = pd.DataFrame(records)
+                stocks = pd.concat([stocks, part], ignore_index=True)
         except Exception:
             pass
+    if not stocks.empty:
+        stocks = stocks.drop_duplicates(subset=["code"])
+        stocks["market_board"] = stocks["code"].map(_classify_market_board)
+        stocks["industry"] = "未分类"
+        stocks = stocks[~stocks["name"].str.contains("ST|\\*ST|退", na=False)]
+        if not stocks.empty:
+            return stocks
 
-    if stocks.empty:
-        return pd.DataFrame(columns=["code", "name", "market_board", "industry"])
+    # 方法4: 从 stocks.csv 文件读取
+    try:
+        csv_path = os.path.join(os.path.dirname(__file__), "stocks.csv")
+        if os.path.exists(csv_path):
+            df = pd.read_csv(csv_path, dtype={"code": str})
+            if not df.empty and "code" in df.columns:
+                if "name" not in df.columns:
+                    df["name"] = df["code"]
+                df["market_board"] = df["code"].map(_classify_market_board)
+                df["industry"] = df.get("industry", "未分类").fillna("未分类")
+                return df
+    except Exception:
+        pass
 
-    if "stockCode" in stocks.columns:
-        stocks["code"] = stocks["stockCode"].apply(_ts_to_code)
-    if "stockName" in stocks.columns:
-        stocks["name"] = stocks["stockName"]
+    # 方法5: 根据已知代码段自动生成股票池
+    _logger.warning("所有 iFinD 接口均失败，使用代码段生成股票池")
+    codes = []
+    # 只覆盖实际有股票的范围，减少无效请求
+    ranges = [
+        ("600000", "603999"),  # 沪主板主要区间
+        ("000001", "003099"),  # 深主板主要区间
+        ("300001", "301599"),  # 创业板主要区间
+    ]
+    for start, end in ranges:
+        for num in range(int(start), int(end) + 1):
+            code = str(num).zfill(6)
+            mb = _classify_market_board(code)
+            if mb in _SUPPORTED_MARKET_BOARDS:
+                codes.append(code)
+    if codes:
+        df = pd.DataFrame({"code": codes, "name": codes, "market_board": "", "industry": "未分类"})
+        df["market_board"] = df["code"].map(_classify_market_board)
+        return df
 
-    stocks["market_board"] = stocks["code"].map(_classify_market_board)
-    stocks["industry"] = "未分类"
-    stocks = stocks[~stocks["name"].str.contains("ST|\\*ST|退", na=False)]
+    return None
 
+
+def _normalize_pool_df(df):
+    """标准化 data_pool 返回的 DataFrame"""
+    if "stockCode" in df.columns:
+        df["code"] = df["stockCode"].apply(_ts_to_code)
+    elif "code" not in df.columns:
+        return pd.DataFrame()
+    if "stockName" in df.columns:
+        df["name"] = df["stockName"]
+    elif "name" not in df.columns:
+        return pd.DataFrame()
+    df["market_board"] = df["code"].map(_classify_market_board)
+    df["industry"] = df.get("industry", "未分类").fillna("未分类")
+    df = df[~df["name"].str.contains("ST|\\*ST|退", na=False)]
     keep_cols = ["code", "name", "market_board", "industry"]
-    stocks = stocks[[c for c in keep_cols if c in stocks.columns]].reset_index(drop=True)
-
-    if supported_only:
-        stocks = stocks[stocks["market_board"].isin(_SUPPORTED_MARKET_BOARDS)]
-    if market_board and market_board not in ("全部板块", "全部市场", "全部"):
-        stocks = stocks[stocks["market_board"] == market_board]
-    if industry and industry not in ("全部行业", "全部"):
-        stocks = stocks[stocks["industry"] == industry]
-    return stocks.reset_index(drop=True)
+    return df[[c for c in keep_cols if c in df.columns]].reset_index(drop=True)
 
 
 def get_scan_universe_options():
