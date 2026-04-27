@@ -90,3 +90,15 @@ export function refreshWatchlist() {
 export function getWatchlistAlerts() {
   return fetchJSON('/watchlist/alerts')
 }
+
+export function getDataSource() {
+  return fetchJSON('/config/datasource')
+}
+
+export function setDataSource(source) {
+  return fetchJSON('/config/datasource', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data_source: source }),
+  })
+}

@@ -5,7 +5,7 @@
 基于"二次突破"量化策略的A股选股系统，自动扫描全市场，识别涨停起爆→缩量整理→二次突破的买入信号，并跟踪止损。
 
 
-- **技术栈**: Python/FastAPI + React/Vite + ECharts + Tushare
+- **技术栈**: Python/FastAPI + React/Vite + ECharts + Tushare / iFinD
 
 ---
 
@@ -163,6 +163,8 @@
 | 变量 | 说明 | 示例 |
 |------|------|------|
 | `TUSHARE_TOKEN` | Tushare API Token | `你的token` |
+| `IFIND_ACCESS_TOKEN` | iFinD 同花顺数据接口 Token | `你的token` |
+| `DATA_SOURCE` | 数据源选择 (`tushare` / `ifind`) | `tushare` |
 
 ### 环境变量（可选）
 
@@ -231,7 +233,10 @@ a_stock_screener/
 │       ├── schedule.py     # 定时扫描API
 │       └── watchlist.py    # 监控API
 ├── strategy.py             # 二次突破策略逻辑
-├── data_fetcher.py         # Tushare 数据获取
+├── data_fetcher.py         # 数据获取门面（Tushare / iFinD）
+├── tushare_backend.py      # Tushare 数据后端
+├── ifind_backend.py        # iFinD 数据后端
+├── ifind_client.py         # iFinD HTTP 客户端
 ├── start.py                # 单服务启动入口
 ├── Dockerfile              # Docker 构建
 ├── railway.toml            # Railway 配置
@@ -243,6 +248,8 @@ a_stock_screener/
     │   ├── components/
     │   │   ├── Dashboard.jsx
     │   │   ├── ScanControls.jsx
+    │   │   ├── DataSourceSelector.jsx
+    │   │   ├── ScanScopeSelector.jsx
     │   │   ├── StrategyParams.jsx
     │   │   ├── ScheduleSettings.jsx
     │   │   ├── ResultsTable.jsx

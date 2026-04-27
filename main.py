@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 
-from data_fetcher import get_stock_list, get_stock_hist, load_csv, scan_all_stocks
+from data_fetcher import get_stock_list, get_stock_hist, load_csv, scan_all_stocks, set_data_source
 from strategy import screen_stock
 
 
@@ -90,15 +90,40 @@ def print_results(results):
 
 def setup_config(token):
     """配置 tushare token"""
-    config = {"tushare_token": token}
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
+    existing = {}
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            existing = json.load(f)
+    existing["tushare_token"] = token
+    existing.setdefault("data_source", "tushare")
     with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
+        json.dump(existing, f, indent=2, ensure_ascii=False)
     print(f"配置已保存至 {config_path}")
 
-    from data_fetcher import _get_pro
-    _get_pro()
-    print("连接测试成功!")
+    set_data_source("tushare")
+    from data_fetcher import _get_backend
+    _get_backend()
+    print("Tushare 连接测试成功!")
+
+
+def setup_ifind_config(token):
+    """配置 iFinD access_token"""
+    config_path = os.path.join(os.path.dirname(__file__), "config.json")
+    existing = {}
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            existing = json.load(f)
+    existing["ifind_access_token"] = token
+    existing["data_source"] = "ifind"
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(existing, f, indent=2, ensure_ascii=False)
+    print(f"配置已保存至 {config_path}")
+
+    set_data_source("ifind")
+    from data_fetcher import _get_backend
+    _get_backend()
+    print("iFinD 连接测试成功!")
 
 
 def main():
@@ -109,10 +134,19 @@ def main():
     parser.add_argument("--delay", type=float, default=0.3, help="请求间隔秒数（默认0.3）")
     parser.add_argument("--output", type=str, default="results.json", help="输出文件名")
     parser.add_argument("--setup", type=str, metavar="TOKEN", help="配置 tushare token")
+    parser.add_argument("--setup-ifind", type=str, metavar="TOKEN", help="配置 iFinD access_token")
+    parser.add_argument("--source", type=str, choices=["tushare", "ifind"], help="切换数据源")
     args = parser.parse_args()
 
     if args.setup:
         setup_config(args.setup)
+        return
+    if args.setup_ifind:
+        setup_ifind_config(args.setup_ifind)
+        return
+    if args.source:
+        set_data_source(args.source)
+        print(f"已切换数据源为: {args.source}")
         return
 
     if args.csv:

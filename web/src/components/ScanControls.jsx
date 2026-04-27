@@ -3,6 +3,7 @@ import { startScan, scanState, stopScan as apiStopScan } from '../api/client'
 import ScanScopeSelector, { loadSavedScope } from './ScanScopeSelector'
 import StrategyParams, { DEFAULTS } from './StrategyParams'
 import ScheduleSettings from './ScheduleSettings'
+import DataSourceSelector from './DataSourceSelector'
 
 const STORAGE_KEY = 'strategy_params'
 
@@ -163,6 +164,7 @@ export default function ScanControls({ onComplete, onParamsChange }) {
   return (
     <>
       <div className="scan-bar">
+        <DataSourceSelector />
         <button className="btn btn-primary" disabled={running} onClick={start}>
           {running ? '扫描中...' : '开始扫描'}
         </button>

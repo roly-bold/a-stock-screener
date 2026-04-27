@@ -2,7 +2,7 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -38,10 +38,39 @@ app.include_router(watchlist.router)
 
 @app.get("/api/health")
 def health():
-    from data_fetcher import _load_config
+    from data_fetcher import _load_config, get_data_source_name
     config = _load_config()
-    has_token = bool(config.get("tushare_token"))
-    return {"status": "ok", "token_configured": has_token}
+    has_ts = bool(config.get("tushare_token"))
+    has_ifind = bool(config.get("ifind_access_token"))
+    return {
+        "status": "ok",
+        "data_source": get_data_source_name(),
+        "tushare_configured": has_ts,
+        "ifind_configured": has_ifind,
+    }
+
+
+@app.get("/api/config/datasource")
+def get_datasource():
+    from data_fetcher import _load_config, get_data_source_name
+    config = _load_config()
+    return {
+        "current": get_data_source_name(),
+        "options": ["tushare", "ifind"],
+        "tushare_configured": bool(config.get("tushare_token")),
+        "ifind_configured": bool(config.get("ifind_access_token")),
+    }
+
+
+@app.post("/api/config/datasource")
+async def set_datasource(request: Request):
+    from data_fetcher import set_data_source
+    body = await request.json()
+    ds = body.get("data_source", "tushare")
+    if ds not in ("tushare", "ifind"):
+        raise HTTPException(status_code=400, detail="无效数据源，可选 tushare / ifind")
+    set_data_source(ds)
+    return {"data_source": ds, "status": "ok"}
 
 
 if os.path.isdir(STATIC_DIR):
