@@ -37,8 +37,8 @@ export default function KlineChart({ history, signals, height = 520, compact = f
         symbolSize: 12,
         symbolRotate: 180,
         symbolOffset: [0, '50%'],
-        itemStyle: { color: '#eab308' },
-        label: { show: true, formatter: '买入', position: 'bottom', color: '#eab308', fontSize: 11 }
+        itemStyle: { color: '#22C55E' },
+        label: { show: true, formatter: '买入', position: 'bottom', color: '#22C55E', fontSize: 11 }
       })
     }
 
@@ -122,7 +122,7 @@ export default function KlineChart({ history, signals, height = 520, compact = f
         data: ma5,
         smooth: true,
         showSymbol: false,
-        lineStyle: { width: 1, color: '#eab308' },
+        lineStyle: { width: 1, color: '#22C55E' },
       },
       {
         name: 'MA20',
