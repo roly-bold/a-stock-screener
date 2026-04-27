@@ -10,6 +10,11 @@ _DEFAULT_TIMEOUT = float(os.environ.get("IFIND_TIMEOUT_SECONDS", "12"))
 _DEFAULT_RETRIES = int(os.environ.get("IFIND_RETRIES", "2"))
 
 
+def _to_date_str(d):
+    """Convert YYYYMMDD string to YYYY-MM-DD for iFinD API."""
+    return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+
+
 class IFindClient:
     def __init__(self, access_token=None, timeout=_DEFAULT_TIMEOUT):
         self._token = access_token or os.environ.get("IFIND_ACCESS_TOKEN", "")
@@ -27,9 +32,11 @@ class IFindClient:
                 resp = self._session.post(url, json=body, timeout=self._timeout)
                 if resp.status_code == 200:
                     data = resp.json()
-                    if data.get("code") == 0:
+                    errcode = data.get("errcode", data.get("errorcode", data.get("code", -1)))
+                    if errcode == 0:
                         return data.get("data", data)
-                    _logger.warning("iFinD API error: %s", data.get("message", data))
+                    errmsg = data.get("errmsg", data.get("message", str(data)))
+                    _logger.warning("iFinD API error (errcode=%s): %s", errcode, errmsg)
                     return None
                 elif resp.status_code == 401:
                     _logger.error("iFinD access_token 无效或已过期")
@@ -52,15 +59,16 @@ class IFindClient:
         return None
 
     def get_history_quotes(self, code, start_date, end_date, indicators="open,high,low,close,volume,amount,pctChange"):
+        sd = _to_date_str(start_date)
+        ed = _to_date_str(end_date)
         body = {
             "codes": code,
             "indicators": indicators,
-            "startDate": start_date,
-            "endDate": end_date,
-            "period": "D",
-            "fqType": "1",
+            "startdate": sd,
+            "enddate": ed,
+            "functionpara": {"Fill": "Blank"},
         }
-        result = self._post("history_quotes", body)
+        result = self._post("cmd_history_quotation", body)
         if not result or "tables" not in result:
             return pd.DataFrame()
         try:
@@ -162,11 +170,14 @@ class IFindClient:
             return pd.DataFrame()
 
     def get_date_sequence(self, codes, indicators, start_date, end_date):
+        sd = _to_date_str(start_date)
+        ed = _to_date_str(end_date)
         body = {
             "codes": ",".join(codes) if isinstance(codes, list) else codes,
             "indicators": indicators,
-            "startDate": start_date,
-            "endDate": end_date,
+            "startdate": sd,
+            "enddate": ed,
+            "functionpara": {"Fill": "Blank"},
         }
         result = self._post("date_sequence", body)
         if not result:
