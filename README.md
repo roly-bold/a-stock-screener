@@ -163,7 +163,6 @@
 | 变量 | 说明 | 示例 |
 |------|------|------|
 | `TUSHARE_TOKEN` | Tushare API Token | `你的token` |
-| `TUSHARE_API_URL` | Tushare 镜像地址 | `http://tushare.xyz` |
 
 ### 环境变量（可选）
 
@@ -203,7 +202,6 @@ python start.py
 docker build -t a-stock-screener .
 docker run -d -p 8000:8000 \
   -e TUSHARE_TOKEN=你的token \
-  -e TUSHARE_API_URL=http://tushare.xyz \
   a-stock-screener
 ```
 
@@ -212,7 +210,7 @@ docker run -d -p 8000:8000 \
 1. GitHub 创建仓库，推送代码
 2. Railway → New Project → Deploy from GitHub repo
 3. Settings → Generate Domain 生成公网地址
-4. Variables 添加 `TUSHARE_TOKEN` 和 `TUSHARE_API_URL`
+4. Variables 添加 `TUSHARE_TOKEN`
 5. 重新部署生效
 
 ---

@@ -3,7 +3,6 @@ import time
 import json
 import logging
 import tushare as ts
-import tushare.pro.client as client
 import pandas as pd
 from tqdm import tqdm
 
@@ -19,7 +18,6 @@ _universe_cache = {"fetched_at": 0.0, "data": None}
 
 def _load_config():
     env_token = os.environ.get("TUSHARE_TOKEN", "")
-    env_url = os.environ.get("TUSHARE_API_URL", "")
     if os.path.exists(_CONFIG_PATH):
         with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -27,8 +25,6 @@ def _load_config():
         data = {}
     if env_token:
         data["tushare_token"] = env_token
-    if env_url:
-        data["tushare_api_url"] = env_url
     return data
 
 
@@ -38,10 +34,8 @@ def _get_pro():
         return _pro
     config = _load_config()
     token = config.get("tushare_token", "")
-    api_url = config.get("tushare_api_url", "http://tushare.xyz")
     if not token:
         raise RuntimeError("未配置 tushare token，请运行: python main.py --setup")
-    client.DataApi._DataApi__http_url = api_url
     _pro = ts.pro_api(token, timeout=_TUSHARE_TIMEOUT_SECONDS)
     return _pro
 

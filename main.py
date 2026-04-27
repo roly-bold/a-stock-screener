@@ -88,9 +88,9 @@ def print_results(results):
               f"{r['latest_close']:<10} {'是' if r['exit_triggered'] else '否':<4}")
 
 
-def setup_config(token, api_url="http://tushare.xyz"):
+def setup_config(token):
     """配置 tushare token"""
-    config = {"tushare_token": token, "tushare_api_url": api_url}
+    config = {"tushare_token": token}
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
