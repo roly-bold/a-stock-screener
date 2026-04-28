@@ -26,6 +26,7 @@ _STATUS_ERROR = "error"
 _scan_status = _STATUS_IDLE
 _cancel_flag = False
 _subscribers: list[asyncio.Queue] = []
+_subscribers_lock = threading.Lock()
 _latest_results: list[dict] = []
 _latest_timestamp = ""
 _last_error = ""
@@ -212,13 +213,20 @@ def set_loop(loop):
 
 def create_queue():
     q = asyncio.Queue()
-    _subscribers.append(q)
+    with _subscribers_lock:
+        _subscribers.append(q)
     return q
 
 
 def remove_queue(q):
-    if q in _subscribers:
-        _subscribers.remove(q)
+    with _subscribers_lock:
+        if q in _subscribers:
+            _subscribers.remove(q)
+
+
+def _clear_subscribers():
+    with _subscribers_lock:
+        _subscribers.clear()
 
 
 def _emit(event: dict):
@@ -231,7 +239,9 @@ def _emit(event: dict):
     if event.get("type") in {"progress", "complete", "error", "cancelled"}:
         _append_history_event(event)
     if _loop:
-        for q in _subscribers:
+        with _subscribers_lock:
+            queues = list(_subscribers)
+        for q in queues:
             _loop.call_soon_threadsafe(q.put_nowait, event)
 
 
@@ -347,7 +357,7 @@ def _run_scan_thread(days, delay, strategy_params, scope):
                     _scan_status = _STATUS_IDLE
                     _emit({"type": "cancelled"})
                     _finish_history_run("cancelled", signals_count=len(results))
-                    _subscribers.clear()
+                    _clear_subscribers()
                     return
                 try:
                     future = next(as_completed(pending, timeout=5))
@@ -409,7 +419,7 @@ def _run_scan_thread(days, delay, strategy_params, scope):
         except Exception:
             pass
 
-        _subscribers.clear()
+        _clear_subscribers()
 
     except Exception as e:
         _last_error = str(e) or "扫描失败"
@@ -417,7 +427,7 @@ def _run_scan_thread(days, delay, strategy_params, scope):
         _logger.exception("扫描任务失败")
         _emit({"type": "error", "message": _last_error})
         _finish_history_run(_STATUS_ERROR, error=_last_error)
-        _subscribers.clear()
+        _clear_subscribers()
 
 
 def start_scan(days=120, delay=0.05, strategy_params=None, scope=None):

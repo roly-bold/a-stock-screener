@@ -7,12 +7,22 @@ from server.models import StockHistoryBar, StockSearchResult
 router = APIRouter(prefix="/api/stock", tags=["stock"])
 
 _stock_list_cache = None
+_stock_list_source = None
+
+
+def clear_stock_list_cache():
+    global _stock_list_cache, _stock_list_source
+    _stock_list_cache = None
+    _stock_list_source = None
 
 
 def _get_stock_list_cached():
-    global _stock_list_cache
-    if _stock_list_cache is None:
+    global _stock_list_cache, _stock_list_source
+    from data_fetcher import get_data_source_name
+    current_source = get_data_source_name()
+    if _stock_list_cache is None or _stock_list_source != current_source:
         _stock_list_cache = get_stock_list()
+        _stock_list_source = current_source
     return _stock_list_cache
 
 

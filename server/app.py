@@ -65,11 +65,13 @@ def get_datasource():
 @app.post("/api/config/datasource")
 async def set_datasource(request: Request):
     from data_fetcher import set_data_source
+    from server.api.stock import clear_stock_list_cache
     body = await request.json()
     ds = body.get("data_source", "tushare")
     if ds not in ("tushare", "ifind"):
         raise HTTPException(status_code=400, detail="无效数据源，可选 tushare / ifind")
     set_data_source(ds)
+    clear_stock_list_cache()
     return {"data_source": ds, "status": "ok"}
 
 

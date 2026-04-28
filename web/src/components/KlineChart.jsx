@@ -145,7 +145,7 @@ export default function KlineChart({ history, signals, height = 520, compact = f
     ],
   }
 
-  return <ReactECharts option={option} style={{ height: 520 }} notMerge={true} />
+  return <ReactECharts option={option} style={{ height }} notMerge={true} />
 }
 
 function calcMA(history, n) {
