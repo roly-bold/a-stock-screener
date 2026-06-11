@@ -7,6 +7,12 @@ from apscheduler.triggers.cron import CronTrigger
 _SCHEDULER = None
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.json")
 
+# ============ 修复 4：明确指定北京时间 ============
+# Railway 容器默认时区是 UTC。原代码 CronTrigger(hour=15, minute=30)
+# 实际是 UTC 15:30 = 北京时间 23:30 才执行。
+# 现在统一按北京时间（Asia/Shanghai）调度，设置 15:30 就是北京时间 15:30。
+_TIMEZONE = os.environ.get("SCHEDULE_TIMEZONE", "Asia/Shanghai")
+
 _DEFAULT_SCHEDULE = {"enabled": False, "hour": 15, "minute": 30}
 _runtime_schedule = None
 
@@ -64,7 +70,8 @@ def _apply_schedule():
         from server import scan_runner
         _SCHEDULER.add_job(
             scan_runner.start_scan,
-            CronTrigger(hour=config["hour"], minute=config["minute"]),
+            # 修复 4：加上 timezone 参数，按北京时间执行
+            CronTrigger(hour=config["hour"], minute=config["minute"], timezone=_TIMEZONE),
             id="daily_scan",
             replace_existing=True,
         )
@@ -72,7 +79,8 @@ def _apply_schedule():
 
 def start_scheduler():
     global _SCHEDULER
-    _SCHEDULER = AsyncIOScheduler()
+    # 修复 4：调度器本身也指定北京时间，保持一致
+    _SCHEDULER = AsyncIOScheduler(timezone=_TIMEZONE)
     _apply_schedule()
     _SCHEDULER.start()
 
