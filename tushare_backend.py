@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import logging
 import tushare as ts
@@ -7,10 +8,23 @@ import pandas as pd
 _pro = None
 _token = None
 _logger = logging.getLogger(__name__)
-_TUSHARE_TIMEOUT_SECONDS = float(os.environ.get("TUSHARE_TIMEOUT_SECONDS", "12"))
+
+# ============ 修复 1：连接超时从 12 秒放宽到 30 秒 ============
+# Railway（美国）到 Tushare（中国）是跨境链路，12 秒经常不够建立连接。
+# 仍可通过环境变量 TUSHARE_TIMEOUT_SECONDS 覆盖。
+_TUSHARE_TIMEOUT_SECONDS = float(os.environ.get("TUSHARE_TIMEOUT_SECONDS", "30"))
+
 _DEFAULT_HIST_RETRIES = int(os.environ.get("TUSHARE_HIST_RETRIES", "2"))
 _UNIVERSE_CACHE_TTL_SECONDS = int(os.environ.get("SCAN_UNIVERSE_CACHE_TTL_SECONDS", "3600"))
 _universe_cache = {"fetched_at": 0.0, "data": None}
+
+# ============ 修复 2：股票列表磁盘缓存文件路径 ============
+# 股票列表一天才变一次，落盘保存后，即使 Tushare 临时连不上，
+# 也能退回用上一次成功拉取的列表，定时扫描不会再因此整体失败。
+_UNIVERSE_DISK_CACHE_PATH = os.path.join(os.path.dirname(__file__), "universe_cache.json")
+
+# ============ 修复 3：stock_basic 重试次数与等待间隔 ============
+_UNIVERSE_RETRIES = int(os.environ.get("TUSHARE_UNIVERSE_RETRIES", "3"))
 
 _TUSHARE_RENAME = {
     "trade_date": "date", "open": "open", "close": "close",
@@ -49,14 +63,90 @@ def _normalize_hist_df(df):
     return df
 
 
+def _load_universe_disk_cache():
+    """从磁盘读取上一次成功保存的股票列表，读不到返回 None"""
+    try:
+        if os.path.exists(_UNIVERSE_DISK_CACHE_PATH):
+            with open(_UNIVERSE_DISK_CACHE_PATH, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            df = pd.DataFrame(payload["data"])
+            if not df.empty:
+                return df, payload.get("fetched_at", 0.0)
+    except Exception:
+        _logger.exception("读取股票列表磁盘缓存失败")
+    return None, 0.0
+
+
+def _save_universe_disk_cache(df, fetched_at):
+    """把股票列表写入磁盘，供下次拉取失败时兜底使用"""
+    try:
+        payload = {
+            "fetched_at": fetched_at,
+            "saved_date": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "data": df.to_dict(orient="records"),
+        }
+        with open(_UNIVERSE_DISK_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception:
+        _logger.exception("保存股票列表磁盘缓存失败")
+
+
+def _fetch_stock_basic_with_retry(pro):
+    """
+    ============ 修复 3：给 stock_basic 加重试 ============
+    原代码只调用一次，跨境网络抖动时直接导致整个扫描任务失败。
+    现在最多重试 _UNIVERSE_RETRIES 次，失败后等待 5/15/30 秒再试。
+    """
+    last_exc = None
+    waits = [5, 15, 30]
+    for attempt in range(_UNIVERSE_RETRIES):
+        try:
+            df = pro.stock_basic(
+                exchange="", list_status="L",
+                fields="ts_code,symbol,name,area,industry",
+            )
+            if df is not None and not df.empty:
+                return df
+            last_exc = RuntimeError("stock_basic 返回空数据")
+        except Exception as exc:
+            last_exc = exc
+            _logger.warning(
+                "拉取股票列表失败，第 %s/%s 次: %s",
+                attempt + 1, _UNIVERSE_RETRIES, exc,
+            )
+        if attempt < _UNIVERSE_RETRIES - 1:
+            time.sleep(waits[min(attempt, len(waits) - 1)])
+    raise last_exc
+
+
 def _get_universe_df(pro):
     now = time.time()
     global _universe_cache
+
+    # 1. 内存缓存仍然新鲜，直接用
     if (_universe_cache["data"] is not None
             and now - _universe_cache["fetched_at"] < _UNIVERSE_CACHE_TTL_SECONDS):
         return _universe_cache["data"].copy()
 
-    df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,symbol,name,area,industry")
+    # 2. 尝试从 Tushare 拉最新列表（带重试）
+    try:
+        df = _fetch_stock_basic_with_retry(pro)
+    except Exception as exc:
+        # ============ 修复 2：拉取失败时退回旧缓存，而不是让整个扫描挂掉 ============
+        # 优先用过期的内存缓存，其次用磁盘缓存。股票列表一天才变一次，
+        # 用昨天的列表扫描完全没问题。
+        if _universe_cache["data"] is not None:
+            _logger.warning("拉取股票列表失败，改用内存中的旧缓存继续扫描: %s", exc)
+            return _universe_cache["data"].copy()
+        disk_df, disk_fetched_at = _load_universe_disk_cache()
+        if disk_df is not None:
+            _logger.warning("拉取股票列表失败，改用磁盘旧缓存继续扫描: %s", exc)
+            _universe_cache["data"] = disk_df
+            _universe_cache["fetched_at"] = disk_fetched_at
+            return disk_df.copy()
+        # 内存、磁盘都没有缓存，只能报错
+        raise
+
     df = df.rename(columns={"symbol": "code"})
     df = df[~df["name"].str.contains("ST|\\*ST|退", na=False)]
     df["industry"] = df["industry"].fillna("未分类")
@@ -64,6 +154,8 @@ def _get_universe_df(pro):
     df = df[["code", "name", "market_board", "industry"]].reset_index(drop=True)
     _universe_cache["data"] = df
     _universe_cache["fetched_at"] = now
+    # 拉取成功后顺手写入磁盘，供以后兜底
+    _save_universe_disk_cache(df, now)
     return df.copy()
 
 
